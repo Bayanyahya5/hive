@@ -1,25 +1,27 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { GoogleGenerativeAI, SchemaType } from "npm:@google/generative-ai";
-import { requireAuthenticatedUser, createServiceClient } from "../_shared/auth.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BATCH_SIZE = 10;
-
+// --- K-MEANS ALGORITHM HELPERS ---
+// Calculate Euclidean distance between two vectors
 function distance(v1: number[], v2: number[]) {
   return Math.sqrt(v1.reduce((sum, val, i) => sum + Math.pow(val - v2[i], 2), 0));
 }
 
+// Pure K-Means implementation
 function kMeans(data: number[][], k: number, maxIterations = 100) {
-  let centroids = data.slice(0, k);
-  const assignments = new Array(data.length).fill(0);
+  let centroids = data.slice(0, k); // Init with first K points
+  let assignments = new Array(data.length).fill(0);
 
   for (let iter = 0; iter < maxIterations; iter++) {
     let changed = false;
 
+    // Assign points to nearest centroid
     for (let i = 0; i < data.length; i++) {
       let minDist = Infinity;
       let clusterIndex = 0;
@@ -36,8 +38,9 @@ function kMeans(data: number[][], k: number, maxIterations = 100) {
       }
     }
 
-    if (!changed) break;
+    if (!changed) break; // Stop if stabilized
 
+    // Recalculate centroids
     const newCentroids = Array.from({ length: k }, () => new Array(data[0].length).fill(0));
     const counts = new Array(k).fill(0);
 
@@ -55,48 +58,14 @@ function kMeans(data: number[][], k: number, maxIterations = 100) {
           newCentroids[i][j] /= counts[i];
         }
       } else {
-        newCentroids[i] = data[Math.floor(Math.random() * data.length)];
+        newCentroids[i] = data[Math.floor(Math.random() * data.length)]; // Handle empty cluster
       }
     }
     centroids = newCentroids;
   }
   return assignments;
 }
-
-async function extractKeywords(
-  genAI: GoogleGenerativeAI,
-  samplePosts: string[],
-): Promise<string[]> {
-  if (samplePosts.length === 0) return ["general", "discourse"];
-
-  const keywordSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-      keywords: {
-        type: SchemaType.ARRAY,
-        items: { type: SchemaType.STRING },
-      },
-    },
-    required: ["keywords"],
-  };
-
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-lite",
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: keywordSchema,
-      temperature: 0.2,
-    },
-  });
-
-  const result = await model.generateContent(
-    `Extract exactly 5 short theme keywords (single words or short phrases) from these synthetic social posts. Return JSON only.\n\nPosts:\n${JSON.stringify(samplePosts.slice(0, 8))}`,
-  );
-
-  const parsed = JSON.parse(result.response.text());
-  const keywords = (parsed.keywords as string[] | undefined) ?? [];
-  return keywords.slice(0, 5).map((k) => String(k).toLowerCase().trim()).filter(Boolean);
-}
+// ---------------------------------
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -104,13 +73,16 @@ serve(async (req) => {
   }
 
   try {
-    await requireAuthenticatedUser(req);
-    const supabase = createServiceClient();
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY') ?? '';
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
     const genAI = new GoogleGenerativeAI(geminiKey);
+    // Use the embedding model, not the text generation model
     const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
+    // 1. Fetch "unclear" profiles that haven't been clustered
     const { data: classifications, error: fetchError } = await supabase
       .from('classifications')
       .select('id, profile_id')
@@ -125,95 +97,92 @@ serve(async (req) => {
       });
     }
 
-    const batchClassifications = classifications.slice(0, BATCH_SIZE);
-    const profileIds = batchClassifications.map((c) => c.profile_id);
-
+    const profileIds = classifications.map(c => c.profile_id);
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
       .select('id, posts(content)')
       .in('id', profileIds);
 
     if (profileError) throw profileError;
-    if (!profiles || profiles.length === 0) {
-      return new Response(JSON.stringify({ message: "No unclear profiles need clustering." }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      });
-    }
 
+    // 2. Generate Embeddings for each user's combined posts
+    console.log(`Generating embeddings for ${profiles.length} profiles...`);
     const embeddings: number[][] = [];
+    
     for (const profile of profiles) {
-      const combinedText = profile.posts.map((p: { content: string }) => p.content).join(" ");
-      const result = await embedModel.embedContent(combinedText || "neutral post");
+      // Combine all posts into one string representing the user's "voice"
+      const combinedText = profile.posts.map((p: any) => p.content).join(" ");
+      const result = await embedModel.embedContent(combinedText);
       embeddings.push(result.embedding.values);
-      await new Promise((r) => setTimeout(r, 200));
+      // Small delay to respect rate limits
+      await new Promise(r => setTimeout(r, 200)); 
     }
 
-    const K = Math.min(3, profiles.length);
+    // 3. Run K-Means Clustering
+    console.log("Running K-Means algorithm...");
+    const K = Math.min(3, profiles.length); // Prevent crashing if there are fewer than 3 unclear profiles
     const clusterAssignments = kMeans(embeddings, K);
 
-    const groupedProfiles: Record<number, typeof profiles> = {};
-    for (let i = 0; i < profiles.length; i++) {
-      const clusterIndex = clusterAssignments[i];
-      if (!groupedProfiles[clusterIndex]) groupedProfiles[clusterIndex] = [];
-      groupedProfiles[clusterIndex].push(profiles[i]);
-    }
+// 4. Group profiles by their new assigned mathematical clusters
+const groupedProfiles: { [key: number]: any[] } = {};
+for (let i = 0; i < profiles.length; i++) {
+  const clusterIndex = clusterAssignments[i];
+  if (!groupedProfiles[clusterIndex]) groupedProfiles[clusterIndex] = [];
+  groupedProfiles[clusterIndex].push(profiles[i]);
+}
 
-    const clusterDbIds: Record<number, string> = {};
+const clusterDbIds: { [key: number]: string } = {};
 
-    for (let i = 0; i < K; i++) {
-      const group = groupedProfiles[i] || [];
-      if (group.length === 0) continue;
+// 5. Create Dynamic Clusters in the Database
+for (let i = 0; i < K; i++) {
+  const group = groupedProfiles[i] || [];
+  if (group.length === 0) continue; 
 
-      const realSamples = group
-        .flatMap((p) => p.posts.map((post: { content: string }) => post.content))
-        .slice(0, 3);
+  // Extract real sample posts from the users in this specific cluster
+  const realSamples = group
+    .flatMap(p => p.posts.map((post: any) => post.content))
+    .slice(0, 3); // Take the first 3 posts as samples
 
-      const topKeywords = await extractKeywords(genAI, realSamples);
+  const { data: newCluster, error: clusterError } = await supabase
+    .from('clusters')
+    .insert({
+      label: `Semantic Cluster ${i + 1}`,
+      top_keywords: ["economy", "daily-life", "moderate"], // General themes for unclear users
+      sample_posts: realSamples.length > 0 ? realSamples : ["No sample data available"]
+    })
+    .select()
+    .single();
+    
+  if (clusterError) throw clusterError;
+  clusterDbIds[i] = newCluster.id;
+}
 
-      const { data: newCluster, error: clusterError } = await supabase
-        .from('clusters')
-        .insert({
-          label: `Semantic Cluster ${i + 1}`,
-          top_keywords: topKeywords,
-          sample_posts: realSamples.length > 0 ? realSamples : ["No sample data available"],
-        })
-        .select()
-        .single();
-
-      if (clusterError) throw clusterError;
-      clusterDbIds[i] = newCluster.id;
-    }
-
-    for (let i = 0; i < profiles.length; i++) {
-      const assignedClusterDbId = clusterDbIds[clusterAssignments[i]];
-      if (assignedClusterDbId) {
-        await supabase
-          .from('classifications')
-          .update({ cluster_id: assignedClusterDbId })
-          .eq('profile_id', profiles[i].id);
-      }
-    }
-
-    const remaining = classifications.length - profiles.length;
-
-    return new Response(JSON.stringify({
-      success: true,
-      processed: profiles.length,
-      remaining,
-      message: `Clustered ${profiles.length} unclear profile(s) using K-Means embeddings.${remaining > 0 ? ` ${remaining} still pending.` : ""}`,
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    });
-
-  } catch (error) {
-    console.error("Function error:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message === "Unauthorized" || message === "Missing Authorization header" ? 401 : 500;
-    return new Response(JSON.stringify({ error: message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status,
-    });
+// 6. Save the cluster IDs to the specific user's classifications
+console.log("Saving assignments to database...");
+for (let i = 0; i < profiles.length; i++) {
+  const assignedClusterDbId = clusterDbIds[clusterAssignments[i]];
+  
+  if (assignedClusterDbId) {
+    await supabase
+      .from('classifications')
+      .update({ cluster_id: assignedClusterDbId })
+      .eq('profile_id', profiles[i].id);
   }
+}
+
+return new Response(JSON.stringify({ 
+  success: true, 
+  message: `Successfully clustered ${profiles.length} profiles using K-Means embeddings.` 
+}), {
+  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  status: 200,
+});
+
+} catch (error) {
+console.error("Function error:", error);
+return new Response(JSON.stringify({ error: error.message }), {
+  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  status: 500,
+});
+}
 });

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { deleteUserGdpr, exportUserGdpr } from '../lib/edgeFunctions';
 import { ShieldCheck, AlertTriangle, Trash2, Download, FileCheck, ToggleLeft, ToggleRight, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function Privacy() {
@@ -44,8 +43,6 @@ export default function Privacy() {
         const profileAgeMs = Date.now() - new Date(profile.created_at).getTime();
         const isRetentionExpired = profileAgeMs > 30 * 24 * 60 * 60 * 1000;
 
-        const account_age_days = Math.floor(profileAgeMs / (24 * 60 * 60 * 1000));
-
         let deletion_reason: 'opt-out' | 'retention' | 'flagged' | null = null;
         if (profile.needs_deletion) {
           if (latestConsent?.scope === 'opt-out') {
@@ -57,25 +54,12 @@ export default function Privacy() {
           }
         }
 
-        let retention_status: 'compliant' | 'warning' | 'expired' | 'flagged';
-        if (profile.needs_deletion) {
-          retention_status = 'flagged';
-        } else if (isRetentionExpired) {
-          retention_status = 'expired';
-        } else if (account_age_days >= 25) {
-          retention_status = 'warning';
-        } else {
-          retention_status = 'compliant';
-        }
-
         return {
           ...profile,
           consent_status: latestConsent?.scope || 'Missing',
           last_updated: validDate,
           deletion_reason,
-          account_age_days,
-          retention_status,
-          is_retention_expired: isRetentionExpired,
+          account_age_days: Math.floor(profileAgeMs / (24 * 60 * 60 * 1000)),
         };
       });
       
@@ -90,7 +74,12 @@ export default function Privacy() {
     setProcessingId(id);
 
     try {
-      await deleteUserGdpr(id);
+      const { data, error } = await supabase.functions.invoke('delete-user', {
+        body: { target_profile_id: id },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       setProfiles(prev => prev.filter(p => p.id !== id));
     } catch (err: any) {
@@ -144,7 +133,12 @@ export default function Privacy() {
     setProcessingId(profile.id);
 
     try {
-      const data = await exportUserGdpr(profile.id);
+      const { data, error } = await supabase.functions.invoke('export-gdpr', {
+        body: { target_profile_id: profile.id },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       downloadJson(
         data,
@@ -185,14 +179,6 @@ export default function Privacy() {
       const timeB = new Date(valB).getTime() || 0;
       if (timeA < timeB) return sortConfig.direction === 'asc' ? -1 : 1;
       if (timeA > timeB) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    }
-
-    if (sortConfig.key === 'account_age_days') {
-      const numA = Number(valA) || 0;
-      const numB = Number(valB) || 0;
-      if (numA < numB) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (numA > numB) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     }
 
@@ -237,35 +223,6 @@ export default function Privacy() {
     return null;
   };
 
-  const RetentionStatusBadge = ({ status, days }: { status: string; days: number }) => {
-    if (status === 'flagged') {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-red-100 text-red-800 border border-red-200">
-          Flagged for deletion
-        </span>
-      );
-    }
-    if (status === 'expired') {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
-          Retention expired ({days}d)
-        </span>
-      );
-    }
-    if (status === 'warning') {
-      return (
-        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-          Expires in {30 - days}d
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-green-100 text-green-800 border border-green-200">
-        Compliant ({days}d)
-      </span>
-    );
-  };
-
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-end">
@@ -306,11 +263,9 @@ export default function Privacy() {
                     <div className="flex items-center gap-1.5">User <SortIcon columnKey="name" /></div>
                   </th>
                   <th onClick={() => handleSort('last_updated')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
-                    <div className="flex items-center gap-1.5">Last Updated <SortIcon columnKey="last_updated" /></div>
+                    <div className="flex items-center gap-1.5">Opt-Out Date <SortIcon columnKey="last_updated" /></div>
                   </th>
-                  <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">
-                    Retention / Reason
-                  </th>
+                  {/* pr-20 shifts the text left to hover perfectly over the buttons */}
                   <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider text-right pr-20">
                     Action
                   </th>
@@ -325,12 +280,6 @@ export default function Privacy() {
                     </td>
                     <td className="p-4 text-gray-600 text-sm">
                       {formatDate(profile.last_updated)}
-                    </td>
-                    <td className="p-4">
-                      <div className="flex flex-col gap-1.5">
-                        <RetentionStatusBadge status={profile.retention_status} days={profile.account_age_days} />
-                        <DeletionReasonBadge reason={profile.deletion_reason} />
-                      </div>
                     </td>
                     <td className="p-4 text-right flex items-center justify-end gap-4">
                       <button
@@ -387,12 +336,10 @@ export default function Privacy() {
                   <th onClick={() => handleSort('last_updated')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
                     <div className="flex items-center gap-1.5">Last Updated <SortIcon columnKey="last_updated" /></div>
                   </th>
-                  <th onClick={() => handleSort('account_age_days')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
-                    <div className="flex items-center gap-1.5">Retention <SortIcon columnKey="account_age_days" /></div>
-                  </th>
                   <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">
                     Privacy Pref.
                   </th>
+                  {/* pr-16 shifts the text left to hover perfectly over the buttons */}
                   <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider text-right pr-16">
                     Actions
                   </th>
@@ -416,10 +363,6 @@ export default function Privacy() {
                     
                     <td className="p-4 text-gray-500 text-sm">
                       {formatDate(profile.last_updated)}
-                    </td>
-
-                    <td className="p-4">
-                      <RetentionStatusBadge status={profile.retention_status} days={profile.account_age_days} />
                     </td>
                     
                     <td className="p-4">
@@ -455,7 +398,7 @@ export default function Privacy() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={6} className="p-10 text-center text-gray-500">No active records found.</td>
+                    <td colSpan={5} className="p-10 text-center text-gray-500">No active records found.</td>
                   </tr>
                 )}
               </tbody>

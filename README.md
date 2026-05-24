@@ -32,7 +32,7 @@ An end-to-end full-stack application for analyzing synthetic political discourse
 | **Frontend** | Vite + React 19 + TypeScript |
 | **Styling** | Tailwind CSS v4, Lucide React icons, Recharts |
 | **Backend / DB** | Supabase (PostgreSQL, Auth, Realtime, Edge Functions) |
-| **AI Engine** | Google Gemini API (`gemini-2.5-flash-lite` for classification/keywords, `gemini-embedding-001` for clustering). The assignment allows Claude or OpenAI; Gemini was chosen for structured JSON and embeddings in one provider. |
+| **AI Engine** | Google Gemini API (`gemini-2.5-flash-lite` for classification, `gemini-embedding-001` for clustering) |
 | **Migrations** | Supabase CLI SQL migrations with Row Level Security (RLS) |
 | **Scheduling** | `pg_cron` for data retention policy |
 | **Deployment** | Vercel (frontend) + Supabase Cloud (backend) |
@@ -195,13 +195,12 @@ Copy the example file and fill in your values:
 cp .env.example .env
 ```
 
-Copy the frontend environment template:
+Create `frontend/.env.local` with the frontend-facing variables:
 
-```bash
-cp frontend/.env.example frontend/.env.local
+```env
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=<from supabase start output>
 ```
-
-Then set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from `supabase start` output or your cloud project.
 
 The root `.env` also needs `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` for seeding and edge functions.
 
@@ -297,10 +296,8 @@ Triggered from the **Overview** page via **Run Classification Pipeline**. The fr
 ### Phase 2 — Clustering (`cluster-profiles`)
 
 - Finds profiles classified as `"unclear"` with no `cluster_id`
-- Processes **10 profiles per invocation** (timeout safety, same as classification)
 - Generates text embeddings via `gemini-embedding-001`
-- Runs **k-means** clustering (k = min(3, batch size))
-- Extracts **top keywords** per cluster via Gemini from member posts
+- Runs **k-means** clustering (k = min(3, profile count))
 - Creates cluster records with labels, keywords, and sample posts
 - Updates `classifications.cluster_id` for each member
 - Loops until no unclustered unclear profiles remain (max 10 rounds)
@@ -316,7 +313,7 @@ All GDPR requirements are implemented as **working application features**, not d
 | **Consent record** | Every seeded profile gets a `consent_log` entry (`scope`, `source`, `timestamp`). Opt-out/opt-in changes append new audit entries. |
 | **Right to deletion** | Privacy Panel "Purge Data" button invokes `delete-user` Edge Function. Deleting a profile cascades to `posts`, `classifications`, and `consent_log` via FK constraints. |
 | **Right to export** | "Export" button invokes `export-gdpr` Edge Function and downloads a JSON file containing profile, posts, classification, and full consent history. |
-| **Retention policy** | `pg_cron` job runs daily at midnight UTC, setting `needs_deletion = true` on profiles older than 30 days. The Privacy Panel shows retention status (compliant / expiring soon / expired / flagged) and deletion reason badges. |
+| **Retention policy** | `pg_cron` job runs daily at midnight UTC, setting `needs_deletion = true` on profiles older than 30 days. Flagged profiles appear in the Privacy Panel deletion queue. |
 | **Opt-out toggle** | Admin can mark a profile for deletion via the Privacy Panel toggle, which updates `needs_deletion` and logs the consent change. |
 
 ---
@@ -395,12 +392,12 @@ See [`.env.example`](.env.example) for the template.
 ## Known Limitations
 
 - **Synthetic data only** — All profiles and posts are LLM-generated. Classification accuracy is illustrative, not authoritative.
-- **Batch processing** — Classification and clustering each handle 10 profiles per Edge Function call to avoid timeouts. Full classification of 200 profiles requires ~20 sequential invocations.
+- **Batch processing** — Classification handles 10 profiles per Edge Function call to avoid timeouts. Full classification of 200 profiles requires multiple sequential invocations (~20 rounds).
 - **Simplified RLS** — A single `authenticated_all` policy grants full access to any logged-in user. Production would require granular role-based policies.
+- **Static cluster keywords** — Cluster `top_keywords` are placeholder values; a production system would extract keywords via TF-IDF or LLM summarization from member posts.
 - **No automated purge** — The retention cron flags profiles for deletion but does not auto-delete them. An admin must confirm deletion via the Privacy Panel.
 - **Single admin model** — No multi-tenant or role hierarchy. One admin account is sufficient per assignment requirements.
-- **Gemini rate limits** — Free-tier API limits may slow seeding and classification. The seed script retries on 429/503 errors and validates 5–15 posts per profile, but large runs may require patience or a paid API tier.
-- **Edge function auth** — Functions require a valid Supabase Auth JWT (`verify_jwt = true`). Only logged-in admins can invoke classification, export, or deletion.
+- **Gemini rate limits** — Free-tier API limits may slow seeding and classification. The seed script retries on 429/503 errors, but large runs may require patience or a paid API tier.
 
 ---
 

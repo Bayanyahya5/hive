@@ -407,7 +407,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.classify-profiles]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/classify-profiles/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -418,7 +418,7 @@ entrypoint = "./functions/classify-profiles/index.ts"
 
 [functions.cluster-profiles]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/cluster-profiles/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -429,7 +429,7 @@ entrypoint = "./functions/cluster-profiles/index.ts"
 
 [functions.export-gdpr]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/export-gdpr/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -440,6 +440,6 @@ entrypoint = "./functions/export-gdpr/index.ts"
 
 [functions.delete-user]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/delete-user/deno.json"
 entrypoint = "./functions/delete-user/index.ts"

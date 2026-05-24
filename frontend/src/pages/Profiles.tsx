@@ -23,7 +23,6 @@ export default function Profiles() {
   const [selectedProfile, setSelectedProfile] = useState<any | null>(null);
   const [userPosts, setUserPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
-  const [clusterLabels, setClusterLabels] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchProfiles();
@@ -33,17 +32,6 @@ export default function Profiles() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, partyFilter, clusterFilter, consentFilter]);
-
-  const latestConsentForProfile = (profileId: string, consentRows: { profile_id: string; scope: string; timestamp?: string }[]) => {
-    const userConsents = consentRows
-      .filter((c) => c.profile_id === profileId)
-      .sort((a, b) => {
-        const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-        const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-        return timeB - timeA;
-      });
-    return userConsents[0] ?? null;
-  };
 
   const fetchProfiles = async () => {
     setLoading(true);
@@ -56,17 +44,10 @@ export default function Profiles() {
 
     const { data: classData } = await supabase.from('classifications').select('profile_id, party, confidence, cluster_id');
     const { data: consentData } = await supabase.from('consent_log').select('profile_id, scope, timestamp');
-    const { data: clusterData } = await supabase.from('clusters').select('id, label');
-
-    const labels: Record<string, string> = {};
-    (clusterData || []).forEach((c) => {
-      labels[c.id] = c.label || `Cluster ${c.id.slice(0, 8)}`;
-    });
-    setClusterLabels(labels);
 
     const mergedProfiles = profilesData?.map(profile => {
       const userClass = classData?.find(c => c.profile_id === profile.id);
-      const userConsent = latestConsentForProfile(profile.id, consentData || []);
+      const userConsent = consentData?.find(c => c.profile_id === profile.id);
       return {
         ...profile,
         classifications: userClass ? [userClass] : [],
@@ -100,10 +81,10 @@ export default function Profiles() {
 
   // --- DYNAMIC DROPDOWN GENERATORS ---
   const uniqueClusters = Array.from(new Set(
-    profiles
-      .map(p => p.classifications?.[0]?.cluster_id)
-      .filter(Boolean) as string[]
-  )).sort((a, b) => (clusterLabels[a] || a).localeCompare(clusterLabels[b] || b));
+    profiles.map(p => p.classifications?.[0]?.cluster_id ? String(p.classifications[0].cluster_id) : 'Unassigned')
+  ))
+  .filter(c => c !== 'Unassigned')
+  .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const uniqueConsents = Array.from(new Set(
     profiles.map(p => p.consent_log?.[0]?.scope || 'Missing')
@@ -112,8 +93,7 @@ export default function Profiles() {
   // --- 1. FILTER ---
   const filteredProfiles = profiles.filter(p => {
     const party = p.classifications?.[0]?.party || 'Unclassified';
-    const clusterId = p.classifications?.[0]?.cluster_id;
-    const cluster = clusterId ? String(clusterId) : 'Unassigned';
+    const cluster = p.classifications?.[0]?.cluster_id ? String(p.classifications[0].cluster_id) : 'Unassigned';
     const consent = p.consent_log?.[0]?.scope || 'Missing';
     const safeName = p.name || '';
     const safeCity = p.city || '';
@@ -226,10 +206,8 @@ export default function Profiles() {
             >
               <option value="All">All Clusters</option>
               <option value="Unassigned">Unassigned</option>
-              {uniqueClusters.map(clusterId => (
-                <option key={clusterId} value={clusterId}>
-                  {clusterLabels[clusterId] || `Cluster ${clusterId.slice(0, 8)}`}
-                </option>
+              {uniqueClusters.map(cluster => (
+                <option key={cluster} value={cluster}>Cluster {cluster}</option>
               ))}
             </select>
           </div>
@@ -381,12 +359,8 @@ export default function Profiles() {
                   </p>
                 </div>
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                  <p className="text-xs text-gray-500 font-semibold mb-1">Cluster</p>
-                  <p className="font-bold text-gray-900 text-sm">
-                    {selectedProfile.classifications?.[0]?.cluster_id
-                      ? (clusterLabels[selectedProfile.classifications[0].cluster_id] || selectedProfile.classifications[0].cluster_id)
-                      : 'N/A'}
-                  </p>
+                  <p className="text-xs text-gray-500 font-semibold mb-1">Cluster ID</p>
+                  <p className="font-bold text-gray-900 text-lg">{selectedProfile.classifications?.[0]?.cluster_id || 'N/A'}</p>
                 </div>
               </div>
 

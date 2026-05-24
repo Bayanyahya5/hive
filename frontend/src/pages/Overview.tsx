@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { invokeEdgeFunction } from '../lib/edgeFunctions';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Play, Users, BrainCircuit, AlertCircle } from 'lucide-react';
 
@@ -40,17 +39,15 @@ export default function Overview() {
 
     setStats({ total, classified, unclassified });
 
-    // Group for the pie chart (includes Unclassified slice)
-    const counts: Record<string, number> = {};
+    // Group for the pie chart
     if (classifications) {
-      classifications.forEach((curr) => {
-        counts[curr.party] = (counts[curr.party] || 0) + 1;
-      });
+      const counts = classifications.reduce((acc: any, curr) => {
+        acc[curr.party] = (acc[curr.party] || 0) + 1;
+        return acc;
+      }, {});
+      
+      setChartData(Object.keys(counts).map(key => ({ name: key, value: counts[key] })));
     }
-    if (unclassified > 0) {
-      counts['Unclassified'] = unclassified;
-    }
-    setChartData(Object.keys(counts).map((key) => ({ name: key, value: counts[key] })));
   };
 
   useEffect(() => {
@@ -90,11 +87,9 @@ export default function Overview() {
       while (classifyRound < MAX_CLASSIFY_ROUNDS) {
         setPipelineMessage(`Classifying profiles (batch ${classifyRound + 1})...`);
   
-        const data = await invokeEdgeFunction<{
-          message?: string;
-          processed?: number;
-          error?: string;
-        }>('classify-profiles');
+        const { data, error } = await supabase.functions.invoke('classify-profiles');
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
   
         await fetchStats();
   
@@ -118,11 +113,9 @@ export default function Overview() {
       while (clusterRound < MAX_CLUSTER_ROUNDS) {
         setPipelineMessage(`Clustering unclear profiles (run ${clusterRound + 1})...`);
   
-        const data = await invokeEdgeFunction<{
-          message?: string;
-          success?: boolean;
-          error?: string;
-        }>('cluster-profiles');
+        const { data, error } = await supabase.functions.invoke('cluster-profiles');
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
   
         await fetchStats();
   
@@ -165,7 +158,7 @@ export default function Overview() {
           className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50 transition-all shadow-md"
         >
           {isProcessing ? <BrainCircuit className="animate-pulse" /> : <Play size={20} />}
-          {isProcessing ? 'Pipeline Running...' : 'Run Classification'}
+          {isProcessing ? 'Pipeline Running...' : 'Run Classification Pipeline'}
         </button>
       </div>
 

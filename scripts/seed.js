@@ -51,23 +51,6 @@ const model = genAI.getGenerativeModel({
 
 const PROFILES_PER_BATCH = 10;
 const TOTAL_BATCHES = 20; // 10 * 20 = 200
-const MIN_POSTS = 5;
-const MAX_POSTS = 15;
-
-function validateProfiles(profiles) {
-  if (!Array.isArray(profiles) || profiles.length !== PROFILES_PER_BATCH) {
-    throw new Error(`Expected ${PROFILES_PER_BATCH} profiles per batch, got ${profiles?.length ?? 0}`);
-  }
-  for (const profile of profiles) {
-    const postCount = profile.posts?.length ?? 0;
-    if (postCount < MIN_POSTS || postCount > MAX_POSTS) {
-      throw new Error(
-        `Profile "${profile.name}" has ${postCount} posts (required ${MIN_POSTS}-${MAX_POSTS})`
-      );
-    }
-  }
-  return profiles;
-}
 
 async function generateBatch(batchNumber) {
   console.log(`Generating batch ${batchNumber}/${TOTAL_BATCHES} with Gemini...`);
@@ -87,7 +70,7 @@ async function generateBatch(batchNumber) {
 
   const result = await model.generateContent(prompt);
   const data = JSON.parse(result.response.text());
-  return validateProfiles(data.profiles);
+  return data.profiles;
 }
 
 async function seedDatabase() {
