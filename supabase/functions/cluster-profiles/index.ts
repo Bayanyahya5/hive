@@ -1,193 +1,518 @@
+// import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+
+// const corsHeaders = {
+//   'Access-Control-Allow-Origin': '*',
+//   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// };
+
+// // --- NLP & MATH HELPERS (NO AI REQUIRED) ---
+
+// // 1. TF-IDF Vectorizer (Turns text into numbers based on word importance)
+// function computeTFIDF(docs: string[]): number[][] {
+//   // Tokenize: lowercase, remove punctuation, keep English and Hebrew letters, drop tiny words
+//   const tokenizedDocs = docs.map(doc => 
+//     doc.toLowerCase().replace(/[^\w\sא-ת]/g, '').split(/\s+/).filter(w => w.length > 2)
+//   );
+  
+//   // Build a unique vocabulary of all words used across all users
+//   const vocab = Array.from(new Set(tokenizedDocs.flat()));
+  
+//   // Calculate Document Frequency (How many documents contain each word)
+//   const df: Record<string, number> = {};
+//   vocab.forEach(word => {
+//     df[word] = tokenizedDocs.filter(doc => doc.includes(word)).length;
+//   });
+
+//   // Calculate the final TF-IDF scores for every user
+//   const N = docs.length;
+//   return tokenizedDocs.map(doc => {
+//     const tf: Record<string, number> = {};
+//     doc.forEach(word => { tf[word] = (tf[word] || 0) + 1; });
+
+//     return vocab.map(word => {
+//       const termFreq = tf[word] || 0;
+//       const inverseDocFreq = Math.log(N / (df[word] || 1));
+//       return termFreq * inverseDocFreq;
+//     });
+//   });
+// }
+
+// // 2. K-Means Helpers
+// function distance(v1: number[], v2: number[]) {
+//   return Math.sqrt(v1.reduce((sum, val, i) => sum + Math.pow(val - v2[i], 2), 0));
+// }
+
+// function kMeans(data: number[][], k: number, maxIterations = 100) {
+//   let centroids = data.slice(0, k); 
+//   let assignments = new Array(data.length).fill(0);
+
+//   for (let iter = 0; iter < maxIterations; iter++) {
+//     let changed = false;
+//     for (let i = 0; i < data.length; i++) {
+//       let minDist = Infinity;
+//       let clusterIndex = 0;
+//       for (let j = 0; j < k; j++) {
+//         const dist = distance(data[i], centroids[j]);
+//         if (dist < minDist) {
+//           minDist = dist;
+//           clusterIndex = j;
+//         }
+//       }
+//       if (assignments[i] !== clusterIndex) {
+//         assignments[i] = clusterIndex;
+//         changed = true;
+//       }
+//     }
+
+//     if (!changed) break; 
+
+//     const newCentroids = Array.from({ length: k }, () => new Array(data[0].length).fill(0));
+//     const counts = new Array(k).fill(0);
+
+//     for (let i = 0; i < data.length; i++) {
+//       const clusterIndex = assignments[i];
+//       for (let j = 0; j < data[i].length; j++) {
+//         newCentroids[clusterIndex][j] += data[i][j];
+//       }
+//       counts[clusterIndex]++;
+//     }
+
+//     for (let i = 0; i < k; i++) {
+//       if (counts[i] > 0) {
+//         for (let j = 0; j < newCentroids[i].length; j++) {
+//           newCentroids[i][j] /= counts[i];
+//         }
+//       } else {
+//         newCentroids[i] = data[Math.floor(Math.random() * data.length)]; 
+//       }
+//     }
+//     centroids = newCentroids;
+//   }
+//   return assignments;
+// }
+
+// /////////////// i added this in the end, so check it
+// // 3. Top keywords per cluster (TF-IDF scores aggregated across member posts)
+// function extractTopKeywords(docs: string[], topN = 5): string[] {
+//   if (docs.length === 0) return [];
+
+//   const tokenizedDocs = docs.map(doc =>
+//     doc.toLowerCase().replace(/[^\w\sא-ת]/g, '').split(/\s+/).filter(w => w.length > 2)
+//   );
+
+//   const vocab = Array.from(new Set(tokenizedDocs.flat()));
+//   const N = docs.length;
+//   const scores: Record<string, number> = {};
+
+//   for (const word of vocab) {
+//     const df = tokenizedDocs.filter(doc => doc.includes(word)).length;
+//     let score = 0;
+//     for (const doc of tokenizedDocs) {
+//       const tf = doc.filter(w => w === word).length;
+//       if (tf > 0) score += tf * Math.log(N / df);
+//     }
+//     scores[word] = score;
+//   }
+
+//   return Object.entries(scores)
+//     .sort((a, b) => b[1] - a[1])
+//     .slice(0, topN)
+//     .map(([word]) => word);
+// }
+// /////////////// i added this in the end, so check it
+
+// // ---------------------------------
+
+// serve(async (req) => {
+//   if (req.method === 'OPTIONS') {
+//     return new Response('ok', { headers: corsHeaders });
+//   }
+
+//   try {
+//     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+//     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY') ?? '';
+//     const supabase = createClient(supabaseUrl, supabaseKey);
+
+//     // 1. Fetch "unclear" profiles
+//     const { data: classifications, error: fetchError } = await supabase
+//       .from('classifications')
+//       .select('id, profile_id')
+//       .eq('party', 'unclear')
+//       .is('cluster_id', null);
+
+//     if (fetchError) throw fetchError;
+//     if (!classifications || classifications.length === 0) {
+//       return new Response(JSON.stringify({ message: "No unclear profiles need clustering." }), {
+//         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+//         status: 200,
+//       });
+//     }
+
+//     const profileIds = classifications.map(c => c.profile_id);
+//     const { data: profiles, error: profileError } = await supabase
+//       .from('profiles')
+//       .select('id, posts(content)')
+//       .in('id', profileIds);
+
+//     if (profileError) throw profileError;
+
+//     // 2. Build sparse document embeddings (TF-IDF vectors) per profile    
+//     console.log(`Running local TF-IDF vectorization for ${profiles.length} profiles...`);
+//     const allTextDocuments = profiles.map(profile => 
+//       profile.posts.map((p: any) => p.content).join(" ")
+//     );
+    
+//     const embeddings = computeTFIDF(allTextDocuments);
+
+//     // 3. Run K-Means Clustering
+//     console.log("Running K-Means algorithm...");
+//     const K = Math.min(3, profiles.length); 
+//     const clusterAssignments = kMeans(embeddings, K);
+
+//     // 4. Group profiles by their new assigned mathematical clusters
+//     const groupedProfiles: { [key: number]: any[] } = {};
+//     for (let i = 0; i < profiles.length; i++) {
+//       const clusterIndex = clusterAssignments[i];
+//       if (!groupedProfiles[clusterIndex]) groupedProfiles[clusterIndex] = [];
+//       groupedProfiles[clusterIndex].push(profiles[i]);
+//     }
+
+//     const clusterDbIds: { [key: number]: string } = {};
+
+//     // 5. Create Dynamic Clusters in the Database
+//     for (let i = 0; i < K; i++) {
+//       const group = groupedProfiles[i] || [];
+//       if (group.length === 0) continue; 
+
+//       const realSamples = group
+//         .flatMap(p => p.posts.map((post: any) => post.content))
+//         .slice(0, 3); 
+
+// /////////////// i added this in the end, so check it
+//       const clusterTexts = group.flatMap(p => p.posts.map((post: any) => post.content));
+//       const keywords = extractTopKeywords(clusterTexts, 5);
+// /////////////// i added this in the end, so check it
+
+//       const { data: newCluster, error: clusterError } = await supabase
+//         .from('clusters')
+//         .insert({
+//           label: `Semantic Cluster ${i + 1}`,
+//           // top_keywords: ["algorithm-generated", "keyword-based"],
+//           top_keywords: keywords.length > 0 ? keywords : ["unclear", "mixed"],
+//           sample_posts: realSamples.length > 0 ? realSamples : ["No sample data available"]
+//         })
+//         .select()
+//         .single();
+        
+//       if (clusterError) throw clusterError;
+//       clusterDbIds[i] = newCluster.id;
+//     }
+
+//     // 6. Save the cluster IDs
+//     console.log("Saving assignments to database...");
+//     for (let i = 0; i < profiles.length; i++) {
+//       const assignedClusterDbId = clusterDbIds[clusterAssignments[i]];
+//       if (assignedClusterDbId) {
+//         await supabase
+//           .from('classifications')
+//           .update({ cluster_id: assignedClusterDbId })
+//           .eq('profile_id', profiles[i].id);
+//       }
+//     }
+
+//     return new Response(JSON.stringify({ 
+//       success: true, 
+//       message: `Successfully clustered ${profiles.length} profiles using TF-IDF embeddings and K-Means.`     }), {
+//       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+//       status: 200,
+//     });
+
+//   } catch (error) {
+//     console.error("Function error:", error);
+//     return new Response(JSON.stringify({ error: error.message }), {
+//       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+//       status: 500,
+//     });
+//   }
+// });
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// --- K-MEANS ALGORITHM HELPERS ---
-// Calculate Euclidean distance between two vectors
-function distance(v1: number[], v2: number[]) {
-  return Math.sqrt(v1.reduce((sum, val, i) => sum + Math.pow(val - v2[i], 2), 0));
+const BATCH_SIZE = 25;
+const MAX_KEYWORDS = 5;
+const MAX_SAMPLE_POSTS = 3;
+
+// ─── Text utilities ───────────────────────────────────────────────────────────
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\sא-ת]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
 }
 
-// Pure K-Means implementation
-function kMeans(data: number[][], k: number, maxIterations = 100) {
-  let centroids = data.slice(0, k); // Init with first K points
-  let assignments = new Array(data.length).fill(0);
+function buildVocabulary(tokenizedDocs: string[][]): string[] {
+  return Array.from(new Set(tokenizedDocs.flat()));
+}
 
-  for (let iter = 0; iter < maxIterations; iter++) {
+/** TF-IDF document embedding: one numeric vector per profile (sparse → dense array). */
+function computeDocumentEmbeddings(tokenizedDocs: string[][]): number[][] {
+  const vocab = buildVocabulary(tokenizedDocs);
+  const N = tokenizedDocs.length;
+  if (N === 0 || vocab.length === 0) return [];
+
+  const df: Record<string, number> = {};
+  for (const word of vocab) {
+    df[word] = tokenizedDocs.filter((doc) => doc.includes(word)).length;
+  }
+
+  const raw = tokenizedDocs.map((doc) => {
+    const tf: Record<string, number> = {};
+    for (const word of doc) tf[word] = (tf[word] || 0) + 1;
+    return vocab.map((word) => {
+      const termFreq = tf[word] || 0;
+      if (termFreq === 0) return 0;
+      const idf = Math.log((N + 1) / (df[word] + 1)) + 1;
+      return termFreq * idf;
+    });
+  });
+
+  return raw.map(l2Normalize);
+}
+
+function l2Normalize(vec: number[]): number[] {
+  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+  if (norm === 0) return vec;
+  return vec.map((v) => v / norm);
+}
+
+function euclidean(a: number[], b: number[]): number {
+  return Math.sqrt(a.reduce((s, v, i) => s + (v - b[i]) ** 2, 0));
+}
+
+/** k-means on embedding vectors (assignment: embedding-based + k-means). */
+function kMeans(embeddings: number[][], k: number, maxIter = 100): number[] {
+  const n = embeddings.length;
+  const dim = embeddings[0]?.length ?? 0;
+  if (n === 0 || dim === 0) return [];
+  if (k >= n) return embeddings.map((_, i) => i);
+
+  // k-means++ style: spread initial centroids
+  const centroids: number[][] = [embeddings[0].slice()];
+  while (centroids.length < k) {
+    const dists = embeddings.map((e) =>
+      Math.min(...centroids.map((c) => euclidean(e, c)))
+    );
+    const total = dists.reduce((a, b) => a + b, 0) || 1;
+    let r = Math.random() * total;
+    let pick = 0;
+    for (let i = 0; i < dists.length; i++) {
+      r -= dists[i];
+      if (r <= 0) {
+        pick = i;
+        break;
+      }
+    }
+    centroids.push(embeddings[pick].slice());
+  }
+
+  let assignments = new Array(n).fill(0);
+
+  for (let iter = 0; iter < maxIter; iter++) {
     let changed = false;
-
-    // Assign points to nearest centroid
-    for (let i = 0; i < data.length; i++) {
-      let minDist = Infinity;
-      let clusterIndex = 0;
-      for (let j = 0; j < k; j++) {
-        const dist = distance(data[i], centroids[j]);
-        if (dist < minDist) {
-          minDist = dist;
-          clusterIndex = j;
+    for (let i = 0; i < n; i++) {
+      let best = 0;
+      let bestDist = Infinity;
+      for (let c = 0; c < k; c++) {
+        const d = euclidean(embeddings[i], centroids[c]);
+        if (d < bestDist) {
+          bestDist = d;
+          best = c;
         }
       }
-      if (assignments[i] !== clusterIndex) {
-        assignments[i] = clusterIndex;
+      if (assignments[i] !== best) {
+        assignments[i] = best;
         changed = true;
       }
     }
+    if (!changed) break;
 
-    if (!changed) break; // Stop if stabilized
-
-    // Recalculate centroids
-    const newCentroids = Array.from({ length: k }, () => new Array(data[0].length).fill(0));
+    const sums = Array.from({ length: k }, () => new Array(dim).fill(0));
     const counts = new Array(k).fill(0);
-
-    for (let i = 0; i < data.length; i++) {
-      const clusterIndex = assignments[i];
-      for (let j = 0; j < data[i].length; j++) {
-        newCentroids[clusterIndex][j] += data[i][j];
-      }
-      counts[clusterIndex]++;
+    for (let i = 0; i < n; i++) {
+      const c = assignments[i];
+      counts[c]++;
+      for (let j = 0; j < dim; j++) sums[c][j] += embeddings[i][j];
     }
-
-    for (let i = 0; i < k; i++) {
-      if (counts[i] > 0) {
-        for (let j = 0; j < newCentroids[i].length; j++) {
-          newCentroids[i][j] /= counts[i];
-        }
-      } else {
-        newCentroids[i] = data[Math.floor(Math.random() * data.length)]; // Handle empty cluster
+    for (let c = 0; c < k; c++) {
+      if (counts[c] > 0) {
+        centroids[c] = l2Normalize(sums[c].map((v) => v / counts[c]));
       }
     }
-    centroids = newCentroids;
   }
+
   return assignments;
 }
-// ---------------------------------
+
+function extractTopKeywords(texts: string[], topN = MAX_KEYWORDS): string[] {
+  const tokenized = texts.map(tokenize).filter((d) => d.length > 0);
+  if (tokenized.length === 0) return [];
+
+  const vocab = buildVocabulary(tokenized);
+  const N = tokenized.length;
+  const scores: Record<string, number> = {};
+
+  for (const word of vocab) {
+    const df = tokenized.filter((d) => d.includes(word)).length;
+    let score = 0;
+    for (const doc of tokenized) {
+      const tf = doc.filter((w) => w === word).length;
+      if (tf > 0) score += tf * Math.log((N + 1) / (df + 1));
+    }
+    scores[word] = score;
+  }
+
+  return Object.entries(scores)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topN)
+    .map(([w]) => w);
+}
+
+type ProfileRow = { id: string; posts: { content: string }[] };
+
+// ─── Edge Function ────────────────────────────────────────────────────────────
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY') ?? '';
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? ""
+    );
 
-    const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
-    const genAI = new GoogleGenerativeAI(geminiKey);
-    // Use the embedding model, not the text generation model
-    const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
-
-    // 1. Fetch "unclear" profiles that haven't been clustered
-    const { data: classifications, error: fetchError } = await supabase
-      .from('classifications')
-      .select('id, profile_id')
-      .eq('party', 'unclear')
-      .is('cluster_id', null);
+    const { data: pending, error: fetchError } = await supabase
+      .from("classifications")
+      .select("profile_id")
+      .eq("party", "unclear")
+      .is("cluster_id", null)
+      .limit(BATCH_SIZE);
 
     if (fetchError) throw fetchError;
-    if (!classifications || classifications.length === 0) {
-      return new Response(JSON.stringify({ message: "No unclear profiles need clustering." }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      });
+    if (!pending?.length) {
+      return new Response(
+        JSON.stringify({ message: "No unclear profiles need clustering." }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      );
     }
 
-    const profileIds = classifications.map(c => c.profile_id);
+    const profileIds = pending.map((r) => r.profile_id);
     const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, posts(content)')
-      .in('id', profileIds);
+      .from("profiles")
+      .select("id, posts(content)")
+      .in("id", profileIds);
 
     if (profileError) throw profileError;
+    if (!profiles?.length) throw new Error("No profile rows returned for unclear IDs.");
 
-    // 2. Generate Embeddings for each user's combined posts
-    console.log(`Generating embeddings for ${profiles.length} profiles...`);
-    const embeddings: number[][] = [];
-    
-    for (const profile of profiles) {
-      // Combine all posts into one string representing the user's "voice"
-      const combinedText = profile.posts.map((p: any) => p.content).join(" ");
-      const result = await embedModel.embedContent(combinedText);
-      // Add a safety check to ensure the embedding actually exists
-      if (!result?.embedding?.values) {
-        console.error(`Failed to generate embedding for profile ${profile.id}`);
-        continue; // Skip this profile instead of crashing the whole function
-      }
-      embeddings.push(result.embedding.values);
-      // Small delay to respect rate limits
-      await new Promise(r => setTimeout(r, 200)); 
+    const rows = profiles as ProfileRow[];
+
+    const documents = rows.map((p) =>
+      (p.posts ?? []).map((post) => post.content).join(" ").trim() || "no content"
+    );
+    const tokenizedDocs = documents.map(tokenize);
+
+    // Step 1: Build embedding vectors (TF-IDF, L2-normalized)
+    const embeddings = computeDocumentEmbeddings(tokenizedDocs);
+    if (embeddings.length === 0) {
+      throw new Error("Could not build document embeddings from post text.");
     }
 
-    // 3. Run K-Means Clustering
-    console.log("Running K-Means algorithm...");
-    const K = Math.min(3, profiles.length); // Prevent crashing if there are fewer than 3 unclear profiles
-    const clusterAssignments = kMeans(embeddings, K);
+    // Step 2: k-means on embeddings
+    const n = embeddings.length;
+    const k = Math.max(1, Math.min(3, n));
+    const assignments = k === 1 ? [0] : kMeans(embeddings, k);
 
-// 4. Group profiles by their new assigned mathematical clusters
-const groupedProfiles: { [key: number]: any[] } = {};
-for (let i = 0; i < profiles.length; i++) {
-  const clusterIndex = clusterAssignments[i];
-  if (!groupedProfiles[clusterIndex]) groupedProfiles[clusterIndex] = [];
-  groupedProfiles[clusterIndex].push(profiles[i]);
-}
+    const groups: ProfileRow[][] = Array.from({ length: k }, () => []);
+    for (let i = 0; i < rows.length; i++) {
+      groups[assignments[i]].push(rows[i]);
+    }
 
-const clusterDbIds: { [key: number]: string } = {};
+    const clusterIdByIndex: Record<number, string> = {};
 
-// 5. Create Dynamic Clusters in the Database
-for (let i = 0; i < K; i++) {
-  const group = groupedProfiles[i] || [];
-  if (group.length === 0) continue; 
+    for (let clusterIndex = 0; clusterIndex < k; clusterIndex++) {
+      const group = groups[clusterIndex];
+      if (group.length === 0) continue;
 
-  // Extract real sample posts from the users in this specific cluster
-  const realSamples = group
-    .flatMap(p => p.posts.map((post: any) => post.content))
-    .slice(0, 3); // Take the first 3 posts as samples
+      const allTexts = group.flatMap((p) =>
+        (p.posts ?? []).map((post) => post.content)
+      );
+      const keywords = extractTopKeywords(allTexts, MAX_KEYWORDS);
+      const label =
+        keywords.length > 0
+          ? `Cluster: ${keywords.slice(0, 3).join(", ")}`
+          : `Unclear group ${clusterIndex + 1}`;
 
-  const { data: newCluster, error: clusterError } = await supabase
-    .from('clusters')
-    .insert({
-      label: `Semantic Cluster ${i + 1}`,
-      top_keywords: ["economy", "daily-life", "moderate"], // General themes for unclear users
-      sample_posts: realSamples.length > 0 ? realSamples : ["No sample data available"]
-    })
-    .select()
-    .single();
-    
-  if (clusterError) throw clusterError;
-  clusterDbIds[i] = newCluster.id;
-}
+      const samplePosts = allTexts
+        .filter((t) => t.trim().length > 0)
+        .slice(0, MAX_SAMPLE_POSTS);
 
-// 6. Save the cluster IDs to the specific user's classifications
-console.log("Saving assignments to database...");
-for (let i = 0; i < profiles.length; i++) {
-  const assignedClusterDbId = clusterDbIds[clusterAssignments[i]];
-  
-  if (assignedClusterDbId) {
-    await supabase
-      .from('classifications')
-      .update({ cluster_id: assignedClusterDbId })
-      .eq('profile_id', profiles[i].id);
+      const { data: clusterRow, error: clusterError } = await supabase
+        .from("clusters")
+        .insert({
+          label,
+          top_keywords: keywords.length > 0 ? keywords : ["unclear", "mixed"],
+          sample_posts:
+            samplePosts.length > 0 ? samplePosts : ["No sample posts available"],
+        })
+        .select("id")
+        .single();
+
+      if (clusterError) throw clusterError;
+      clusterIdByIndex[clusterIndex] = clusterRow.id;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+      const clusterDbId = clusterIdByIndex[assignments[i]];
+      if (!clusterDbId) continue;
+
+      const { error: updateError } = await supabase
+        .from("classifications")
+        .update({ cluster_id: clusterDbId })
+        .eq("profile_id", rows[i].id);
+
+      if (updateError) throw updateError;
+    }
+
+    const remaining = pending.length === BATCH_SIZE;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        processed: rows.length,
+        clusters_created: Object.keys(clusterIdByIndex).length,
+        method: "tfidf-document-embeddings + k-means",
+        message: remaining
+          ? `Clustered ${rows.length} unclear profiles (batch). Run pipeline again if more remain.`
+          : `Clustered ${rows.length} unclear profiles using TF-IDF embeddings and k-means.`,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+    );
+  } catch (error) {
+    console.error("cluster-profiles error:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+    });
   }
-}
-
-return new Response(JSON.stringify({ 
-  success: true, 
-  message: `Successfully clustered ${profiles.length} profiles using K-Means embeddings.` 
-}), {
-  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  status: 200,
-});
-
-} catch (error) {
-console.error("Function error:", error);
-return new Response(JSON.stringify({ error: error.message }), {
-  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  status: 500,
-});
-}
 });

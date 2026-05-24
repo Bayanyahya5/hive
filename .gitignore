@@ -33,3 +33,5 @@ supabase/snippets/
 .env.development
 .env.test
 .env.production
+
+.vercel

@@ -60,6 +60,11 @@ export default function Privacy() {
           last_updated: validDate,
           deletion_reason,
           account_age_days: Math.floor(profileAgeMs / (24 * 60 * 60 * 1000)),
+
+          /////////////// i added this in the end, so check it
+          is_retention_expired: isRetentionExpired,
+          /////////////// i added this in the end, so check it
+
         };
       });
       
@@ -197,8 +202,9 @@ export default function Privacy() {
     if (sortConfig.key !== columnKey) return <ChevronUp size={14} className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />;
     return sortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-blue-600" /> : <ChevronDown size={14} className="text-blue-600" />;
   };
-
-  const DeletionReasonBadge = ({ reason }: { reason: string | null }) => {
+  
+  /////////////// i added this in the end, so check it
+  const DeletionReasonBadge = ({ reason }: { reason: 'opt-out' | 'retention' | 'flagged' | null }) => {
     if (reason === 'opt-out') {
       return (
         <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-200">
@@ -216,12 +222,28 @@ export default function Privacy() {
     if (reason === 'flagged') {
       return (
         <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
-          Flagged
+          Flagged for Deletion
         </span>
       );
     }
-    return null;
+    return <span className="text-xs text-gray-400">—</span>;
   };
+
+  const RetentionBadge = ({ accountAgeDays, isRetentionExpired }: { accountAgeDays: number; isRetentionExpired: boolean }) => {
+    if (isRetentionExpired) {
+      return (
+        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
+          Retention flag due ({accountAgeDays}d)
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+        Day {accountAgeDays} / 30
+      </span>
+    );
+  };
+  /////////////// i added this in the end, so check it
 
   return (
     <div className="space-y-8">
@@ -265,7 +287,12 @@ export default function Privacy() {
                   <th onClick={() => handleSort('last_updated')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
                     <div className="flex items-center gap-1.5">Opt-Out Date <SortIcon columnKey="last_updated" /></div>
                   </th>
-                  {/* pr-20 shifts the text left to hover perfectly over the buttons */}
+                  <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">
+                    Deletion Reason
+                  </th>
+                  <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">
+                    Retention
+                  </th>
                   <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider text-right pr-20">
                     Action
                   </th>
@@ -280,6 +307,15 @@ export default function Privacy() {
                     </td>
                     <td className="p-4 text-gray-600 text-sm">
                       {formatDate(profile.last_updated)}
+                    </td>
+                    <td className="p-4">
+                      <DeletionReasonBadge reason={profile.deletion_reason} />
+                    </td>
+                    <td className="p-4">
+                      <RetentionBadge
+                        accountAgeDays={profile.account_age_days}
+                        isRetentionExpired={profile.is_retention_expired}
+                      />
                     </td>
                     <td className="p-4 text-right flex items-center justify-end gap-4">
                       <button
@@ -336,6 +372,9 @@ export default function Privacy() {
                   <th onClick={() => handleSort('last_updated')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
                     <div className="flex items-center gap-1.5">Last Updated <SortIcon columnKey="last_updated" /></div>
                   </th>
+                  <th onClick={() => handleSort('account_age_days')} className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors group select-none">
+                    <div className="flex items-center gap-1.5">Retention <SortIcon columnKey="account_age_days" /></div>
+                  </th>
                   <th className="p-4 font-semibold text-gray-500 text-xs uppercase tracking-wider">
                     Privacy Pref.
                   </th>
@@ -363,6 +402,13 @@ export default function Privacy() {
                     
                     <td className="p-4 text-gray-500 text-sm">
                       {formatDate(profile.last_updated)}
+                    </td>
+
+                    <td className="p-4">
+                      <RetentionBadge
+                        accountAgeDays={profile.account_age_days}
+                        isRetentionExpired={profile.is_retention_expired}
+                      />
                     </td>
                     
                     <td className="p-4">
@@ -398,7 +444,7 @@ export default function Privacy() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={5} className="p-10 text-center text-gray-500">No active records found.</td>
+                    <td colSpan={6} className="p-10 text-center text-gray-500">No active records found.</td>
                   </tr>
                 )}
               </tbody>
