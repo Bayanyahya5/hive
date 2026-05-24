@@ -105,8 +105,10 @@ serve(async (req) => {
 
     // 4. Execute real Gemini call
     const result = await model.generateContent(prompt);
-    const aiData = JSON.parse(result.response.text());
-
+    // Safely drill into the raw data object without relying on the .text() helper method
+    const aiText = result.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!aiText) throw new Error("Gemini returned an empty response.");
+    const aiData = JSON.parse(aiText);
     // 5. Re-map integers back to real database UUIDs
     const mappedClassifications = aiData.classifications.map((aiResult: any) => ({
       profile_id: unclassifiedProfiles[aiResult.index].id,

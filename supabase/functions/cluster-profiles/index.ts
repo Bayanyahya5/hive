@@ -113,6 +113,11 @@ serve(async (req) => {
       // Combine all posts into one string representing the user's "voice"
       const combinedText = profile.posts.map((p: any) => p.content).join(" ");
       const result = await embedModel.embedContent(combinedText);
+      // Add a safety check to ensure the embedding actually exists
+      if (!result?.embedding?.values) {
+        console.error(`Failed to generate embedding for profile ${profile.id}`);
+        continue; // Skip this profile instead of crashing the whole function
+      }
       embeddings.push(result.embedding.values);
       // Small delay to respect rate limits
       await new Promise(r => setTimeout(r, 200)); 
