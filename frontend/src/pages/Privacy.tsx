@@ -60,11 +60,7 @@ export default function Privacy() {
           last_updated: validDate,
           deletion_reason,
           account_age_days: Math.floor(profileAgeMs / (24 * 60 * 60 * 1000)),
-
-          /////////////// i added this in the end, so check it
           is_retention_expired: isRetentionExpired,
-          /////////////// i added this in the end, so check it
-
         };
       });
       
@@ -203,7 +199,6 @@ export default function Privacy() {
     return sortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-blue-600" /> : <ChevronDown size={14} className="text-blue-600" />;
   };
   
-  /////////////// i added this in the end, so check it
   const DeletionReasonBadge = ({ reason }: { reason: 'opt-out' | 'retention' | 'flagged' | null }) => {
     if (reason === 'opt-out') {
       return (
@@ -243,7 +238,6 @@ export default function Privacy() {
       </span>
     );
   };
-  /////////////// i added this in the end, so check it
 
   return (
     <div className="space-y-8">

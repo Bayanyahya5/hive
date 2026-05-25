@@ -45,18 +45,8 @@ export default function Profiles() {
     const { data: classData } = await supabase.from('classifications').select('profile_id, party, confidence, cluster_id');
     const { data: consentData } = await supabase.from('consent_log').select('profile_id, scope, timestamp');
 
-    // const mergedProfiles = profilesData?.map(profile => {
-    //   const userClass = classData?.find(c => c.profile_id === profile.id);
-    //   const userConsent = consentData?.find(c => c.profile_id === profile.id);
-    //   return {
-    //     ...profile,
-    //     classifications: userClass ? [userClass] : [],
-    //     consent_log: userConsent ? [userConsent] : []
-    //   };
-    /////////////// i added this in the end, so check it
     const mergedProfiles = profilesData?.map(profile => {
       const userClass = classData?.find(c => c.profile_id === profile.id);
-
       const userConsents = (consentData || [])
         .filter(c => c.profile_id === profile.id)
         .sort((a, b) => {
@@ -72,7 +62,6 @@ export default function Profiles() {
         classifications: userClass ? [userClass] : [],
         consent_log: latestConsent ? [latestConsent] : []
       };
-      /////////////// i added this in the end, so check it
     }) || [];
 
     setProfiles(mergedProfiles);

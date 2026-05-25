@@ -10,8 +10,8 @@ End-to-end full-stack application for analyzing **synthetic** political discours
 
 | Resource | Link |
 |----------|------|
-| **Live Dashboard** (Vercel + Supabase Cloud) | (https://hive-50gjeg767-bayan-s-projects3.vercel.app) |
-| **GitHub Repository** | (https://github.com/Bayanyahya5/hive) |
+| **Live Dashboard** (Vercel + Supabase Cloud) | [Live Dashboard](https://hive-50gjeg767-bayan-s-projects3.vercel.app) |
+| **GitHub Repository** | [GitHub](https://github.com/Bayanyahya5/hive) |
 
 **Two ways to run the app:**
 
@@ -137,7 +137,7 @@ flowchart TB
 ## Project Structure
 
 ```
-political-dashboard/
+/
 ├── frontend/                    # Vite + React (npm scripts live here)
 │   ├── src/pages/               # Login, Overview, Profiles, Clusters, Privacy
 │   ├── package.json
